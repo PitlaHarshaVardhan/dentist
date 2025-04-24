@@ -6,77 +6,32 @@ const jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
 const multer = require("multer");
 const path = require("path");
-const {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-} = require("@aws-sdk/client-s3");
-const { v4: uuidv4 } = require("uuid");
+const fs = require("fs");
 const PDFDocument = require("pdfkit");
-const winston = require("winston");
-require("dotenv").config();
+require("dotenv").config(); // Add dotenv for environment variables
 
 const app = express();
-const port = process.env.PORT || 3001;
-
-// Logger
-const logger = winston.createLogger({
-  level: "info",
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.File({ filename: "error.log", level: "error" }),
-    new winston.transports.File({ filename: "combined.log" }),
-    new winston.transports.Console(),
-  ],
-});
+const port = 3001;
 
 // Middleware
-app.use(
-  cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
-    credentials: true,
-  })
-);
+app.use(cors({ origin: "http://localhost:3000", credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
-
-// S3 Configuration
-const s3 = new S3Client({
-  region: process.env.AWS_REGION,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  },
-});
-
-// Multer for memory storage
-const storage = multer.memoryStorage();
-const upload = multer({
-  storage,
-  fileFilter: (req, file, cb) => {
-    const filetypes = /jpeg|jpg|png/;
-    const mimetype = filetypes.test(file.mimetype);
-    const extname = filetypes.test(
-      path.extname(file.originalname).toLowerCase()
-    );
-    if (mimetype && extname) return cb(null, true);
-    cb(new Error("Only JPEG/PNG images allowed"));
-  },
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
-});
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // MongoDB Connection
 mongoose
-  .connect(process.env.MONGO_URI, {
-    ssl: true,
-    serverSelectionTimeoutMS: 5000,
-  })
-  .then(() => logger.info("Connected to MongoDB Atlas"))
+  .connect(
+    process.env.MONGO_URI ||
+      "mongodb+srv://22h51a73b6:22h51a73b6harsha@cluster-1.uvwfoof.mongodb.net/dental?retryWrites=true&w=majority",
+    {
+      ssl: true,
+      serverSelectionTimeoutMS: 5000,
+    }
+  )
+  .then(() => console.log("Connected to MongoDB Atlas"))
   .catch((err) => {
-    logger.error(`MongoDB connection error: ${err.message}`);
+    console.error("MongoDB connection error:", err);
     process.exit(1);
   });
 
@@ -89,8 +44,8 @@ const userSchema = new mongoose.Schema({
 });
 
 const checkupSchema = new mongoose.Schema({
-  patientId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-  dentistId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+  patientId: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // Reference User model
+  dentistId: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // Reference User model
   status: { type: String, enum: ["pending", "completed"], default: "pending" },
   images: [{ url: String, description: String }],
   createdAt: { type: Date, default: Date.now },
@@ -98,6 +53,14 @@ const checkupSchema = new mongoose.Schema({
 
 const User = mongoose.model("User", userSchema);
 const Checkup = mongoose.model("Checkup", checkupSchema);
+
+// Multer Storage
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, "uploads/"),
+  filename: (req, file, cb) =>
+    cb(null, Date.now() + path.extname(file.originalname)),
+});
+const upload = multer({ storage });
 
 // JWT Verification Middleware
 const verifyToken = (req, res, next) => {
@@ -126,10 +89,9 @@ app.post("/register", async (req, res) => {
       return res.status(400).json({ error: "User already exists" });
     const user = new User({ username, email, password: hashedPassword, role });
     await user.save();
-    logger.info(`User registered: ${email}`);
     res.status(201).json({ message: "User registered" });
   } catch (err) {
-    logger.error(`Registration error for ${email}: ${err.message}`);
+    console.error("Registration error:", err);
     res.status(500).json({ error: "Registration failed" });
   }
 });
@@ -145,24 +107,25 @@ app.post("/login", async (req, res) => {
     const isValid = await bcrypt.compare(password, user.password);
     if (!isValid) return res.status(401).json({ error: "Invalid credentials" });
     const token = jwt.sign(
-      { userId: user._id, role: user.role, username: user.username },
+      { userId: user._id, role: user.role },
       process.env.JWT_SECRET || "dental_checkup_secret",
       { expiresIn: "1h" }
     );
+    // Set JWT in cookie
     res.cookie("jwt_token", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "Strict",
-      maxAge: 3600000,
+      secure: process.env.NODE_ENV === "production", // Secure in production
+      sameSite: "Strict", // Prevent CSRF
+      maxAge: 3600000, // 1 hour in milliseconds
     });
-    logger.info(`User logged in: ${email}`);
+    console.log("Cookie set:", { jwt_token: token }); // Debug cookie
     res.json({
       message: "Login successful",
       userId: user._id,
       role: user.role,
     });
   } catch (err) {
-    logger.error(`Login error for ${email}: ${err.message}`);
+    console.error("Login error:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
@@ -170,7 +133,6 @@ app.post("/login", async (req, res) => {
 // Logout Endpoint
 app.post("/logout", (req, res) => {
   res.cookie("jwt_token", "", { httpOnly: true, expires: new Date(0) });
-  logger.info("User logged out");
   res.json({ message: "Logged out" });
 });
 
@@ -182,7 +144,7 @@ app.get("/dentists", verifyToken, async (req, res) => {
     );
     res.json(dentists);
   } catch (err) {
-    logger.error(`Fetch dentists error: ${err.message}`);
+    console.error("Fetch dentists error:", err);
     res.status(500).json({ error: "Failed to fetch dentists" });
   }
 });
@@ -194,10 +156,9 @@ app.post("/checkup", verifyToken, async (req, res) => {
   try {
     const checkup = new Checkup({ patientId: req.user.userId, dentistId });
     await checkup.save();
-    logger.info(`Checkup requested by user ${req.user.userId}`);
     res.json({ message: "Checkup requested" });
   } catch (err) {
-    logger.error(`Checkup request error: ${err.message}`);
+    console.error("Checkup request error:", err);
     res.status(500).json({ error: "Failed to request checkup" });
   }
 });
@@ -210,7 +171,7 @@ app.get("/checkups/patient", verifyToken, async (req, res) => {
     }).populate("dentistId", "username");
     res.json(checkups);
   } catch (err) {
-    logger.error(`Fetch patient checkups error: ${err.message}`);
+    console.error("Fetch patient checkups error:", err);
     res.status(500).json({ error: "Failed to fetch checkups" });
   }
 });
@@ -225,7 +186,7 @@ app.get("/checkups/dentist", verifyToken, async (req, res) => {
     }).populate("patientId", "username");
     res.json(checkups);
   } catch (err) {
-    logger.error(`Fetch dentist checkups error: ${err.message}`);
+    console.error("Fetch dentist checkups error:", err);
     res.status(500).json({ error: "Failed to fetch checkups" });
   }
 });
@@ -247,34 +208,16 @@ app.post(
       const checkup = await Checkup.findById(id);
       if (!checkup || checkup.dentistId.toString() !== req.user.userId)
         return res.status(404).json({ error: "Checkup not found" });
-
-      const images = [];
-      for (let i = 0; i < req.files.length; i++) {
-        const file = req.files[i];
-        const key = `checkups/${id}/${uuidv4()}${path.extname(
-          file.originalname
-        )}`;
-        await s3.send(
-          new PutObjectCommand({
-            Bucket: process.env.AWS_S3_BUCKET,
-            Key: key,
-            Body: file.buffer,
-            ContentType: file.mimetype,
-          })
-        );
-        images.push({
-          url: `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`,
-          description: descriptionArray[i] || "",
-        });
-      }
-
+      const images = req.files.map((file, index) => ({
+        url: `/uploads/${file.filename}`,
+        description: descriptionArray[index] || "",
+      }));
       checkup.images.push(...images);
       checkup.status = "completed";
       await checkup.save();
-      logger.info(`Images uploaded for checkup ${id}`);
       res.json({ message: "Images uploaded" });
     } catch (err) {
-      logger.error(`Upload images error for checkup ${id}: ${err.message}`);
+      console.error("Upload images error:", err);
       res.status(500).json({ error: "Failed to upload images" });
     }
   }
@@ -291,6 +234,13 @@ app.get("/checkup/:id/pdf", verifyToken, async (req, res) => {
     if (!checkup || checkup.patientId.toString() !== req.user.userId)
       return res.status(404).json({ error: "Checkup not found" });
 
+    // Debug populated data
+    console.log("Populated checkup:", {
+      checkupId: checkup._id,
+      dentistId: checkup.dentistId?._id,
+      dentistUsername: checkup.dentistId?.username,
+    });
+
     const pdfDoc = new PDFDocument();
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
@@ -304,44 +254,27 @@ app.get("/checkup/:id/pdf", verifyToken, async (req, res) => {
       .moveDown();
     pdfDoc
       .fontSize(12)
-      .text(`Dentist: ${checkup.dentistId?.username || "Unknown"}`)
+      .text(`Dentist: ${checkup.dentistId?.username || "Unknown"}`) // Fallback if username is missing
       .moveDown();
     pdfDoc
       .text(`Date: ${new Date(checkup.createdAt).toLocaleDateString()}`)
       .moveDown();
-
-    for (const [index, image] of checkup.images.entries()) {
+    checkup.images.forEach((image, index) => {
       pdfDoc
         .text(`Image ${index + 1}: ${image.description || "No description"}`)
         .moveDown();
-      const key = image.url.split(".com/")[1];
-      const command = new GetObjectCommand({
-        Bucket: process.env.AWS_S3_BUCKET,
-        Key: key,
-      });
-      const { Body } = await s3.send(command);
-      const buffer = await new Promise((resolve, reject) => {
-        const chunks = [];
-        Body.on("data", (chunk) => chunks.push(chunk));
-        Body.on("error", reject);
-        Body.on("end", () => resolve(Buffer.concat(chunks)));
-      });
-      pdfDoc.image(buffer, { width: 200 }).moveDown();
-    }
-
+      pdfDoc
+        .image(path.join(__dirname, image.url.slice(1)), { width: 200 })
+        .moveDown();
+    });
     pdfDoc.end();
-    logger.info(`PDF generated for checkup ${id}`);
   } catch (err) {
-    logger.error(`Generate PDF error for checkup ${id}: ${err.message}`);
+    console.error("Generate PDF error:", err);
     res.status(500).json({ error: "Failed to generate PDF" });
   }
 });
 
-// Error Handling Middleware
-app.use((err, req, res, next) => {
-  logger.error(`Server error: ${err.message}`);
-  res.status(500).json({ error: "Internal server error" });
-});
-
 // Start Server
-app.listen(port, () => logger.info(`Server running on port ${port}`));
+app.listen(port, () =>
+  console.log(`Server running on http://localhost:${port}`)
+);
