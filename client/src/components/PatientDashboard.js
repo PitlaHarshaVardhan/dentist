@@ -13,11 +13,15 @@ const PatientDashboard = () => {
 
   useEffect(() => {
     axios
-      .get("http://localhost:3001/dentists", { withCredentials: true })
+      .get(`${process.env.REACT_APP_API_URL}/dentists`, {
+        withCredentials: true,
+      })
       .then((res) => setDentists(res.data))
       .catch((err) => console.error("Fetch dentists error:", err));
     axios
-      .get("http://localhost:3001/checkups/patient", { withCredentials: true })
+      .get(`${process.env.REACT_APP_API_URL}/checkups/patient`, {
+        withCredentials: true,
+      })
       .then((res) => setCheckups(res.data))
       .catch((err) => console.error("Fetch checkups error:", err));
   }, []);
@@ -25,12 +29,12 @@ const PatientDashboard = () => {
   const handleCheckupRequest = async () => {
     try {
       await axios.post(
-        "http://localhost:3001/checkup",
+        `${process.env.REACT_APP_API_URL}/checkup`,
         { dentistId: selectedDentist },
         { withCredentials: true }
       );
       axios
-        .get("http://localhost:3001/checkups/patient", {
+        .get(`${process.env.REACT_APP_API_URL}/checkups/patient`, {
           withCredentials: true,
         })
         .then((res) => setCheckups(res.data));
@@ -41,7 +45,16 @@ const PatientDashboard = () => {
   };
 
   const handleDownloadPDF = (checkupId) => {
-    window.open(`http://localhost:3001/checkup/${checkupId}/pdf`, "_blank");
+    window.open(
+      `${process.env.REACT_APP_API_URL}/checkup/${checkupId}/pdf`,
+      "_blank"
+    );
+  };
+
+  const getImageUrl = (imageUrl) => {
+    return imageUrl.startsWith("http")
+      ? imageUrl
+      : `${process.env.REACT_APP_API_URL}${imageUrl}`;
   };
 
   return (
@@ -132,7 +145,7 @@ const PatientDashboard = () => {
                             className="border border-gray-200 p-3 rounded-lg bg-gray-50"
                           >
                             <img
-                              src={`http://localhost:3001${image.url}`}
+                              src={getImageUrl(image.url)}
                               alt={`Checkup ${index + 1}`}
                               className="w-full h-48 object-cover rounded-lg mb-2"
                             />

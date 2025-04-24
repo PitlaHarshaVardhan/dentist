@@ -14,12 +14,16 @@ const Register = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      await axios.post("http://localhost:3001/register", {
-        username,
-        email,
-        password,
-        role,
-      });
+      await axios.post(
+        `${process.env.REACT_APP_API_URL}/register`,
+        {
+          username,
+          email,
+          password,
+          role,
+        },
+        { withCredentials: true }
+      );
       navigate("/login");
     } catch (err) {
       setError(err.response?.data?.error || "Registration failed");

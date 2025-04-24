@@ -1,6 +1,7 @@
 import { createContext, useState, useEffect } from "react";
 import axios from "axios";
-import Cookies from "js-cookie";
+import Cookie from "js-cookie";
+import { jwtDecode } from "jwt-decode";
 
 export const AuthContext = createContext();
 
@@ -8,39 +9,45 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
 
   useEffect(() => {
-    const token = Cookies.get("jwt_token");
+    const token = Cookie.get("jwt_token");
     if (token) {
-      axios
-        .get("http://localhost:3001/checkups/patient", {
-          withCredentials: true,
-        })
-        .then(() => setUser(JSON.parse(localStorage.getItem("user"))))
-        .catch(() => {
-          Cookies.remove("jwt_token");
-          localStorage.removeItem("user");
+      try {
+        const decoded = jwtDecode(token);
+        setUser({
+          userId: decoded.userId,
+          role: decoded.role,
+          username: decoded.username,
         });
+      } catch (err) {
+        console.error("Invalid token:", err);
+        Cookie.remove("jwt_token");
+      }
     }
   }, []);
 
   const login = async (email, password) => {
     const response = await axios.post(
-      "http://localhost:3001/login",
+      `${process.env.REACT_APP_API_URL}/login`,
       { email, password },
       { withCredentials: true }
     );
-    setUser(response.data);
-    localStorage.setItem("user", JSON.stringify(response.data));
-    return response.data;
+    const { userId, role } = response.data;
+    const token = Cookie.get("jwt_token");
+    if (token) {
+      const decoded = jwtDecode(token);
+      setUser({ userId, role, username: decoded.username });
+      return { role };
+    }
+    throw new Error("Login failed: No token received");
   };
 
-  const logout = async () => {
-    await axios.post(
-      "http://localhost:3001/logout",
+  const logout = () => {
+    axios.post(
+      `${process.env.REACT_APP_API_URL}/logout`,
       {},
       { withCredentials: true }
     );
-    Cookies.remove("jwt_token");
-    localStorage.removeItem("user");
+    Cookie.remove("jwt_token");
     setUser(null);
   };
 

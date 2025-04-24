@@ -12,7 +12,9 @@ const DentistDashboard = () => {
 
   useEffect(() => {
     axios
-      .get("http://localhost:3001/checkups/dentist", { withCredentials: true })
+      .get(`${process.env.REACT_APP_API_URL}/checkups/dentist`, {
+        withCredentials: true,
+      })
       .then((res) => setCheckups(res.data))
       .catch((err) => console.error("Fetch checkups error:", err));
   }, []);
@@ -34,7 +36,7 @@ const DentistDashboard = () => {
     descriptions.forEach((desc) => formData.append("descriptions", desc));
     try {
       await axios.post(
-        `http://localhost:3001/checkup/${selectedCheckup._id}/upload`,
+        `${process.env.REACT_APP_API_URL}/checkup/${selectedCheckup._id}/upload`,
         formData,
         { withCredentials: true }
       );
@@ -42,7 +44,7 @@ const DentistDashboard = () => {
       setImages([]);
       setDescriptions([]);
       axios
-        .get("http://localhost:3001/checkups/dentist", {
+        .get(`${process.env.REACT_APP_API_URL}/checkups/dentist`, {
           withCredentials: true,
         })
         .then((res) => setCheckups(res.data));
